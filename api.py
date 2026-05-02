@@ -1,6 +1,4 @@
-# api.py
-# FastAPI middleware wrapper — biggest judge impact feature
-# Run with: python api.py
+
 # Swagger UI at: http://127.0.0.1:8000/docs
 
 from fastapi import FastAPI, HTTPException
@@ -145,6 +143,59 @@ def clear_logs():
     if os.path.exists(LOG_FILE):
         os.remove(LOG_FILE)
     return {"status": "logs cleared"}
+
+
+# ── LLM Proxy Endpoint ────────────────────────────────────────────────────────
+from groq import Groq
+
+from dotenv import load_dotenv
+load_dotenv()
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+class ChatRequest(BaseModel):
+    prompt: str
+    system_prompt: str = "You are a helpful assistant."
+
+class ChatResponse(BaseModel):
+    status: str        # "blocked" or "allowed"
+    verdict: str       # "ATTACK" or "SAFE"
+    confidence: float
+    message: str       # LLM reply if safe, block message if attack
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest):
+    if not req.prompt or not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+
+    # Step 1 — classify
+    result = analyze_prompt(req.prompt, rephrase=False)
+    log_to_csv(req.prompt, result)
+
+    # Step 2 — block if attack
+    if result["label"] == "attack":
+        return ChatResponse(
+            status="blocked",
+            verdict="ATTACK",
+            confidence=result["confidence"],
+            message="🚨 Prompt injection detected. This prompt was blocked and never reached the LLM."
+        )
+
+    # Step 3 — forward to Groq if safe
+    groq_response = groq_client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": req.system_prompt},
+            {"role": "user",   "content": req.prompt}
+        ]
+    )
+
+    return ChatResponse(
+        status="allowed",
+        verdict="SAFE",
+        confidence=result["confidence"],
+        message=groq_response.choices[0].message.content
+    )
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
