@@ -13,7 +13,13 @@ with open("classifier.pkl", "rb") as f:
 
 with open("label_encoder.pkl", "rb") as f:
     le = pickle.load(f)
-
+try:
+    with open("rf_classifier.pkl", "rb") as f:
+        rf_clf = pickle.load(f)
+    print("RF model loaded.")
+except FileNotFoundError:
+    print("WARNING: rf_classifier.pkl not found. Using SVM only.")
+    rf_clf = None
 print("Models loaded.")
 
 ATTACK_THRESHOLD = 0.6
@@ -95,7 +101,7 @@ def get_safe_rephrasing(text):
 
 def analyze_prompt(text, rephrase=True):
     normalized = normalize_text(text)
-    embedding = model.encode([normalized])
+    embedding = model.encode([text])  # use original for embedding
     proba = clf.predict_proba(embedding)[0]
     classes = le.classes_
     confidence_dict = dict(zip(classes, proba))
