@@ -197,22 +197,6 @@ def chat(req: ChatRequest, request: Request):
     )
 
 
-    # Step 3 — forward to Groq if safe
-    groq_response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": req.system_prompt},
-            {"role": "user",   "content": req.prompt}
-        ]
-    )
-
-    return ChatResponse(
-        status="allowed",
-        verdict="SAFE",
-        confidence=result["confidence"],
-        message=groq_response.choices[0].message.content
-    )
-
 # ── Run ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
