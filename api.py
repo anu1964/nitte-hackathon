@@ -1,8 +1,8 @@
-
-# Swagger UI at: http://127.0.0.1:8000/docs
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from classifier import analyze_prompt
 import csv
@@ -10,12 +10,18 @@ import os
 from datetime import datetime
 import uvicorn
 
+# ── Rate Limiter Setup ─────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
+
 # ── App Setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Safe Prompt Guardian",
     description="Middleware API to detect and block malicious LLM prompts before they reach your AI.",
     version="1.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # Allow all origins (needed if frontend calls this API)
 app.add_middleware(
@@ -81,13 +87,12 @@ def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 @app.post("/analyze", response_model=PromptResponse)
-def analyze(req: PromptRequest):
+@limiter.limit("30/minute")
+def analyze(req: PromptRequest, request: Request):
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
-
     result = analyze_prompt(req.prompt, rephrase=req.rephrase)
     log_to_csv(req.prompt, result)
-
     return PromptResponse(
         label=result["label"],
         confidence=result["confidence"],
@@ -164,15 +169,12 @@ class ChatResponse(BaseModel):
     message: str       # LLM reply if safe, block message if attack
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
+@limiter.limit("20/minute")
+def chat(req: ChatRequest, request: Request):
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
-
-    # Step 1 — classify
     result = analyze_prompt(req.prompt, rephrase=False)
     log_to_csv(req.prompt, result)
-
-    # Step 2 — block if attack
     if result["label"] == "attack":
         return ChatResponse(
             status="blocked",
@@ -180,6 +182,20 @@ def chat(req: ChatRequest):
             confidence=result["confidence"],
             message="🚨 Prompt injection detected. This prompt was blocked and never reached the LLM."
         )
+    groq_response = groq_client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": req.system_prompt},
+            {"role": "user",   "content": req.prompt}
+        ]
+    )
+    return ChatResponse(
+        status="allowed",
+        verdict="SAFE",
+        confidence=result["confidence"],
+        message=groq_response.choices[0].message.content
+    )
+
 
     # Step 3 — forward to Groq if safe
     groq_response = groq_client.chat.completions.create(
