@@ -18,7 +18,20 @@ print("Models loaded.")
 
 ATTACK_THRESHOLD = 0.6
 
-
+def normalize_text(text):
+    import re
+    text = text.lower()
+    leet_map = {
+        '0': 'o', '1': 'i', '3': 'e', '4': 'a',
+        '5': 's', '6': 'g', '7': 't', '@': 'a',
+        '$': 's', '!': 'i', '+': 't'
+    }
+    for k, v in leet_map.items():
+        text = text.replace(k, v)
+    import re
+    text = re.sub(r'(?<=[a-z]) (?=[a-z])', '', text)
+    text = re.sub(r'[^a-z0-9\s]', '', text)
+    return text
 def get_attack_category(text):
     text_lower = text.lower()
     if any(w in text_lower for w in [
@@ -81,7 +94,8 @@ def get_safe_rephrasing(text):
 
 
 def analyze_prompt(text, rephrase=True):
-    embedding = model.encode([text])
+    normalized = normalize_text(text)
+    embedding = model.encode([normalized])
     proba = clf.predict_proba(embedding)[0]
     classes = le.classes_
     confidence_dict = dict(zip(classes, proba))
