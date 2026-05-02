@@ -1,0 +1,29 @@
+name: Safe Prompt Guardian — Prompt Injection Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  scan-prompts:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install requests
+
+    - name: Scan prompts for injection attacks
+      env:
+        GUARDIAN_API: ${{ secrets.GUARDIAN_API_URL }}
+      run: python .github/scripts/scan_prompts.py
